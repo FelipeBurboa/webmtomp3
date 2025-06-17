@@ -15,7 +15,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const UPLOAD_DIR = process.env.UPLOAD_DIR || "/tmp";
+const UPLOAD_DIR = process.env.UPLOAD_DIR || "uploads";
 
 // Middleware
 app.use(helmet());
