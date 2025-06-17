@@ -1,0 +1,14 @@
+GET http://localhost:3000/health
+
+###
+POST http://localhost:3000/api/convert
+Content-Type: application/json
+
+{
+    "url": "https://uklfdugabopbuqmpoiao.supabase.co/storage/v1/object/public/whatsapp-media//recording.webm",
+    "outputFormat": "mp3",
+    "bitrate": "128k"
+}
+
+###
+GET http://localhost:3000/api/download/cf5d9f74-2bc7-47de-969f-0571027fb8fa
