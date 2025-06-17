@@ -1,4 +1,4 @@
-GET http://localhost:3000/health
+GET http://ocw48ccw4ko4ock8o4848oo0.35.175.246.204.sslip.io/health
 
 ###
 POST http://localhost:3000/api/convert

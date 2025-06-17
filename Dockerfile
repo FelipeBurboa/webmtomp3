@@ -28,15 +28,22 @@ RUN npm run build
 RUN npm prune --production && \
     rm -rf src/ tsconfig.json node_modules/@types
 
+# Create uploads directory and set permissions
+RUN mkdir -p /app/uploads && \
+    chmod 755 /app/uploads
+
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S audioconv -u 1001 -G nodejs
 
-# Change ownership of app directory and temp directory
-RUN chown -R audioconv:nodejs /app /tmp
+# Change ownership of app directory and uploads directory
+RUN chown -R audioconv:nodejs /app /tmp /app/uploads
 
 # Switch to non-root user
 USER audioconv
+
+# Set environment variable for upload directory
+ENV UPLOAD_DIR=/app/uploads
 
 # Expose port
 EXPOSE 3000
