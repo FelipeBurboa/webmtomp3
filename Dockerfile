@@ -13,8 +13,10 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (using npm install instead of npm ci)
-RUN npm install && \
+# Install ALL dependencies (incl. devDependencies) for the TypeScript build.
+# --include=dev forces devDeps even when NODE_ENV=production is set by the
+# build environment (e.g. Coolify build-time env var).
+RUN npm ci --include=dev && \
     npm cache clean --force
 
 # Copy TypeScript configuration and source code
