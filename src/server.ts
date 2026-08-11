@@ -39,7 +39,7 @@ app.use(express.json());
 // Types
 interface ConversionRequest {
   url: string;
-  outputFormat?: "mp3" | "wav" | "aac";
+  outputFormat?: "mp3" | "wav" | "aac" | "mp4";
   bitrate?: string;
 }
 
@@ -60,9 +60,22 @@ const isValidUrl = (url: string): boolean => {
   }
 };
 
-const isValidAudioFormat = (format: string): boolean => {
-  const validFormats = ["mp3", "wav", "aac"];
-  return validFormats.includes(format);
+const VALID_FORMATS = ["mp3", "wav", "aac", "mp4"];
+
+const isValidOutputFormat = (format: string): boolean =>
+  VALID_FORMATS.includes(format);
+
+const MIME_TYPES: Record<string, string> = {
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  aac: "audio/aac",
+  mp4: "video/mp4",
+};
+
+// El input puede ser webm, mov, etc. ffmpeg detecta por contenido, la extension es solo cosmetica
+const inputExtFromUrl = (url: string): string => {
+  const ext = path.extname(new URL(url).pathname).slice(1).toLowerCase();
+  return /^[a-z0-9]{1,5}$/.test(ext) ? ext : "bin";
 };
 
 const cleanupFile = async (filePath: string): Promise<void> => {
@@ -91,16 +104,29 @@ const downloadFile = async (url: string, outputPath: string): Promise<void> => {
   await pipeline(nodeReadable, fileStream);
 };
 
-const convertAudio = async (
+const convertMedia = async (
   inputPath: string,
   outputPath: string,
   outputFormat: string = "mp3",
   bitrate: string = "128k"
 ): Promise<void> => {
   return new Promise((resolve, reject) => {
-    const ffmpegArgs = [
-      "-i",
-      inputPath,
+    const videoArgs = [
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      bitrate,
+      "-movflags",
+      "+faststart", // moov al inicio: WhatsApp rechaza mp4 sin esto (131053)
+    ];
+
+    const audioArgs = [
       "-acodec",
       outputFormat === "mp3"
         ? "libmp3lame"
@@ -113,6 +139,12 @@ const convertAudio = async (
       "44100",
       "-ac",
       "2",
+    ];
+
+    const ffmpegArgs = [
+      "-i",
+      inputPath,
+      ...(outputFormat === "mp4" ? videoArgs : audioArgs),
       "-y", // overwrite output file
       outputPath,
     ];
@@ -167,15 +199,20 @@ app.post("/api/convert", async (req, res) => {
     } as ConversionResponse);
   }
 
-  if (!isValidAudioFormat(outputFormat)) {
+  if (!isValidOutputFormat(outputFormat)) {
     return res.status(400).json({
       success: false,
-      error: "Invalid output format. Supported formats: mp3, wav, aac",
+      error: `Invalid output format. Supported formats: ${VALID_FORMATS.join(
+        ", "
+      )}`,
     } as ConversionResponse);
   }
 
   const fileId = uuidv4();
-  const inputPath = path.join(UPLOAD_DIR, `${fileId}_input.webm`);
+  const inputPath = path.join(
+    UPLOAD_DIR,
+    `${fileId}_input.${inputExtFromUrl(url)}`
+  );
   const outputPath = path.join(UPLOAD_DIR, `${fileId}_output.${outputFormat}`);
 
   try {
@@ -183,9 +220,9 @@ app.post("/api/convert", async (req, res) => {
     console.log(`Downloading file from: ${url}`);
     await downloadFile(url, inputPath);
 
-    // Convert the audio
-    console.log(`Converting audio: ${inputPath} -> ${outputPath}`);
-    await convertAudio(inputPath, outputPath, outputFormat, bitrate);
+    // Convert
+    console.log(`Converting: ${inputPath} -> ${outputPath}`);
+    await convertMedia(inputPath, outputPath, outputFormat, bitrate);
 
     // Check if output file exists
     const stats = await fs.stat(outputPath);
@@ -232,11 +269,10 @@ app.get("/api/download/:fileId", async (req, res) => {
 
   try {
     // Try to find the output file (check all supported formats)
-    const formats = ["mp3", "wav", "aac"];
     let outputPath: string | null = null;
     let fileFormat: string | null = null;
 
-    for (const format of formats) {
+    for (const format of VALID_FORMATS) {
       const testPath = path.join(UPLOAD_DIR, `${fileId}_output.${format}`);
       try {
         await fs.access(testPath);
@@ -257,20 +293,12 @@ app.get("/api/download/:fileId", async (req, res) => {
 
     // Set appropriate headers
     const stats = await fs.stat(outputPath);
-    const mimeTypes = {
-      mp3: "audio/mpeg",
-      wav: "audio/wav",
-      aac: "audio/aac",
-    };
 
-    res.setHeader(
-      "Content-Type",
-      mimeTypes[fileFormat as keyof typeof mimeTypes]
-    );
+    res.setHeader("Content-Type", MIME_TYPES[fileFormat] ?? "application/octet-stream");
     res.setHeader("Content-Length", stats.size);
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="converted_audio.${fileFormat}"`
+      `attachment; filename="converted.${fileFormat}"`
     );
 
     // Stream the file
@@ -322,15 +350,20 @@ app.post("/api/convert-download", async (req, res) => {
     });
   }
 
-  if (!isValidAudioFormat(outputFormat)) {
+  if (!isValidOutputFormat(outputFormat)) {
     return res.status(400).json({
       success: false,
-      error: "Invalid output format. Supported formats: mp3, wav, aac",
+      error: `Invalid output format. Supported formats: ${VALID_FORMATS.join(
+        ", "
+      )}`,
     });
   }
 
   const fileId = uuidv4();
-  const inputPath = path.join(UPLOAD_DIR, `${fileId}_input.webm`);
+  const inputPath = path.join(
+    UPLOAD_DIR,
+    `${fileId}_input.${inputExtFromUrl(url)}`
+  );
   const outputPath = path.join(UPLOAD_DIR, `${fileId}_output.${outputFormat}`);
 
   try {
@@ -338,9 +371,9 @@ app.post("/api/convert-download", async (req, res) => {
     console.log(`Downloading file from: ${url}`);
     await downloadFile(url, inputPath);
 
-    // Convert the audio
-    console.log(`Converting audio: ${inputPath} -> ${outputPath}`);
-    await convertAudio(inputPath, outputPath, outputFormat, bitrate);
+    // Convert
+    console.log(`Converting: ${inputPath} -> ${outputPath}`);
+    await convertMedia(inputPath, outputPath, outputFormat, bitrate);
 
     // Check if output file exists
     const stats = await fs.stat(outputPath);
@@ -351,20 +384,11 @@ app.post("/api/convert-download", async (req, res) => {
     console.log(`Conversion successful: ${outputPath} (${stats.size} bytes)`);
 
     // Set headers for download
-    const mimeTypes = {
-      mp3: "audio/mpeg",
-      wav: "audio/wav",
-      aac: "audio/aac",
-    };
-
-    res.setHeader(
-      "Content-Type",
-      mimeTypes[outputFormat as keyof typeof mimeTypes]
-    );
+    res.setHeader("Content-Type", MIME_TYPES[outputFormat] ?? "application/octet-stream");
     res.setHeader("Content-Length", stats.size);
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="converted_audio.${outputFormat}"`
+      `attachment; filename="converted.${outputFormat}"`
     );
 
     // Stream the file directly to response
